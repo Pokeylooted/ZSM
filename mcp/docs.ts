@@ -15,7 +15,7 @@ export async function ensureDocs(
     isMcpMode = true,
     docSource: DocSource = "local",
 ): Promise<BuiltinFunction[]> {
-    const paths = envPaths("zig-mcp", { suffix: "" });
+    const paths = envPaths("zigsm", { suffix: "" });
     const metadataPath = path.join(paths.cache, zigVersion, "metadata.json");
 
     let shouldUpdate = false;
@@ -99,7 +99,7 @@ export async function downloadSourcesTar(
         }
     }
 
-    const paths = envPaths("zig-mcp", { suffix: "" });
+    const paths = envPaths("zigsm", { suffix: "" });
     const versionCacheDir = path.join(paths.cache, zigVersion);
     const sourcesPath = path.join(versionCacheDir, "sources.tar");
 
@@ -132,7 +132,7 @@ export async function downloadSourcesTar(
 }
 
 async function downloadSourcesTarPath(zigVersion: string): Promise<string> {
-    const paths = envPaths("zig-mcp", { suffix: "" });
+    const paths = envPaths("zigsm", { suffix: "" });
     const versionCacheDir = path.join(paths.cache, zigVersion);
     const sourcesPath = path.join(versionCacheDir, "sources.tar");
 

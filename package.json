@@ -1,9 +1,9 @@
 {
-  "name": "zig-mcp",
+  "name": "zigsm",
   "version": "1.4.0",
   "type": "module",
   "bin": {
-    "zig-mcp": "dist/mcp.js"
+    "zsm": "dist/mcp.js"
   },
   "main": "dist/mcp.js",
   "files": [

@@ -960,7 +960,7 @@ async function getEmbeddingCachePath(
 ): Promise<string> {
     const envPathsMod = await import("env-paths");
     const path = await import("node:path");
-    const paths = envPathsMod.default("zig-mcp", { suffix: "" });
+    const paths = envPathsMod.default("zigsm", { suffix: "" });
     const safeModel = model.replace(/[^a-zA-Z0-9._-]+/g, "-");
     return path.join(paths.cache, zigVersion, `std-embeddings-${docSource}-${safeModel}.json`);
 }

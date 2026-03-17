@@ -14,7 +14,7 @@ async function extractBuiltinFunctions(
     isMcpMode = true,
     forceUpdate = false,
 ): Promise<BuiltinFunction[]> {
-    const paths = envPaths("zig-mcp", { suffix: "" });
+    const paths = envPaths("zigsm", { suffix: "" });
     const versionCacheDir = path.join(paths.cache, zigVersion);
     const outputPath = path.join(versionCacheDir, "builtin-functions.json");
 

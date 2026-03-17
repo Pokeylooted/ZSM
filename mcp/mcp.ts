@@ -69,7 +69,7 @@ function parseArgs(args: string[]): CLIOptions {
 }
 
 function printHelp() {
-    console.log(`Usage: zig-mcp [options] [command]
+    console.log(`Usage: zsm [options] [command]
 
 Commands:
   update                                    Update documentation without starting MCP server
@@ -85,11 +85,11 @@ Options:
   -h, --help                                Show this help message
 
 Examples:
-  zig-mcp                                   # Start MCP server with master version (local)
-  zig-mcp --version 0.14.1                  # Start with specific version (remote)
-  zig-mcp --update-policy daily             # Auto-update daily on startup
-  zig-mcp update --version 0.14.1           # Update docs to specific version
-  zig-mcp view --version master             # View documentation for specific version`);
+    zsm                                       # Start MCP server with master version (local)
+    zsm --version 0.14.1                      # Start with specific version (remote)
+    zsm --update-policy daily                 # Auto-update daily on startup
+    zsm update --version 0.14.1               # Update docs to specific version
+    zsm view --version master                 # View documentation for specific version`);
 }
 
 async function main() {

@@ -1,4 +1,9 @@
-# Zig Docs MCP
+# ZSM
+
+ZSM - fork of **Zig Docs MCP**
+
+> [!NOTE]
+> This fork keeps the original behavior and documentation flow nearly unchanged. The main addition vs upstream is addition of embeddings for better semantic retrieval in search tools.
 
 Model Context Protocol (MCP) server that provides up-to-date documentation for the Zig programming language standard library and builtin functions.
 
@@ -29,19 +34,19 @@ The CLI provides flexible options for version control and update management:
 
 ```bash
 # Start MCP server
-zig-mcp --doc-source local
+zsm --doc-source local
 
 # Use specific Zig version from ziglang.org instead of local Zig
-zig-mcp --doc-source remote --version 0.14.1
+zsm --doc-source remote --version 0.14.1
 
 # Enable automatic daily updates
-zig-mcp --doc-source remote --update-policy daily
+zsm --doc-source remote --update-policy daily
 
 # Update documentation without starting MCP server (only for remote)
-zig-mcp update --version 0.15.1
+zsm update --version 0.15.1
 
 # Start local web server to view documentation
-zig-mcp view --version 0.15.1
+zsm view --version 0.15.1
 ```
 
 **Version options `--version`**:
@@ -69,9 +74,9 @@ The server automatically uses your local Zig installation to serve documentation
 ### Remote Mode
 
 When using `--doc-source remote`, documentation is fetched from ziglang.org and cached in platform-specific directories:
-- Linux: `~/.cache/zig-mcp/`
-- macOS: `~/Library/Caches/zig-mcp/`
-- Windows: `%LOCALAPPDATA%\zig-mcp\`
+- Linux: `~/.cache/zigsm/`
+- macOS: `~/Library/Caches/zigsm/`
+- Windows: `%LOCALAPPDATA%\zigsm\`
 
 ## Embeddings (Voyage)
 
@@ -88,12 +93,12 @@ The installation examples below use the local documentation source by default. I
 ### Claude Code
 Using npx (Node.js)
 ```bash
-claude mcp add zig-docs -- npx -y zig-mcp@latest
+claude mcp add zsm -- npx -y zigsm@latest
 ```
 
 Using bunx (Bun)
 ```bash
-claude mcp add zig-docs -- bunx zig-mcp@latest
+claude mcp add zsm -- bunx zigsm@latest
 ```
 
 ### Roo Code
@@ -116,9 +121,9 @@ Add the JSON configuration below to your MCP settings file.
 ```json
 {
   "mcpServers": {
-    "zig-docs": {
+    "zsm": {
       "command": "npx",
-      "args": ["-y", "zig-mcp@latest"]
+      "args": ["-y", "zigsm@latest"]
     }
   }
 }
@@ -128,9 +133,9 @@ Add the JSON configuration below to your MCP settings file.
 ```json
 {
   "mcpServers": {
-    "zig-docs": {
+    "zsm": {
       "command": "bunx",
-      "args": ["zig-mcp@latest"]
+      "args": ["zigsm@latest"]
     }
   }
 }
@@ -142,21 +147,21 @@ If you prefer downloading documentation from ziglang.org instead of using your l
 
 Using npx (Node.js)
 ```bash
-claude mcp add zig-docs -- npx -y zig-mcp@latest --doc-source remote --version master
+claude mcp add zsm -- npx -y zigsm@latest --doc-source remote --version master
 ```
 
 Using bunx (Bun)
 ```bash
-claude mcp add zig-docs -- bunx zig-mcp@latest --doc-source remote --version 0.14.1
+claude mcp add zsm -- bunx zigsm@latest --doc-source remote --version 0.14.1
 ```
 
 **Node.js (remote):**
 ```json
 {
   "mcpServers": {
-    "zig-docs": {
+    "zsm": {
       "command": "npx",
-      "args": ["-y", "zig-mcp@latest", "--doc-source", "remote", "--version", "master"]
+      "args": ["-y", "zigsm@latest", "--doc-source", "remote", "--version", "master"]
     }
   }
 }
@@ -166,9 +171,9 @@ claude mcp add zig-docs -- bunx zig-mcp@latest --doc-source remote --version 0.1
 ```json
 {
   "mcpServers": {
-    "zig-docs": {
+    "zsm": {
       "command": "bunx",
-      "args": ["zig-mcp@latest", "--doc-source", "remote", "--version", "0.14.1"]
+      "args": ["zigsm@latest", "--doc-source", "remote", "--version", "0.14.1"]
     }
   }
 }
