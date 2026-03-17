@@ -21,6 +21,8 @@ By default, the server uses your locally installed Zig compiler to serve documen
 - **`search_std_lib`** - Search the Zig standard library for declarations by name. Returns a list of matching items with their fully qualified names. Use this to discover available types, functions, and constants in the standard library.
 - **`get_std_lib_item`** - Get detailed documentation for a specific standard library item by its fully qualified name (e.g., "std.ArrayList.init"). Returns comprehensive documentation including function signatures, parameters, errors, examples, and source code. Set `get_source_file: true` to retrieve the entire source file where the item is implemented.
 
+When `VOYAGE_API_KEY` is set, search tools automatically use hybrid ranking (lexical + embeddings) and fall back to lexical-only results if embeddings are unavailable.
+
 ## Commands
 
 The CLI provides flexible options for version control and update management:
@@ -70,6 +72,14 @@ When using `--doc-source remote`, documentation is fetched from ziglang.org and 
 - Linux: `~/.cache/zig-mcp/`
 - macOS: `~/Library/Caches/zig-mcp/`
 - Windows: `%LOCALAPPDATA%\zig-mcp\`
+
+## Embeddings (Voyage)
+
+Optional environment variables:
+- `VOYAGE_API_KEY` - Enables embeddings for doc search when set.
+- `VOYAGE_MODEL` - Embedding model override (default: `voyage-3-lite`).
+
+Embeddings are cached per Zig version, doc source, and model in the same cache directory used for docs.
 
 ## Installation
 
