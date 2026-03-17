@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "zig-mcp",
+      "name": "zsm",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.15.0",
         "cheerio": "^1.1.0",

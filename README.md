@@ -117,13 +117,19 @@ Add the JSON configuration below to your MCP settings file.
 
 ### JSON Configuration Template
 
+To enable semantic search with Voyage embeddings, include an `env` block like shown below.
+
 **Node.js:**
 ```json
 {
   "mcpServers": {
     "zsm": {
       "command": "npx",
-      "args": ["-y", "zigsm@latest"]
+      "args": ["-y", "zigsm@latest"],
+      "env": {
+        "VOYAGE_API_KEY": "your_voyage_api_key",
+        "VOYAGE_MODEL": "voyage-3-lite"
+      }
     }
   }
 }
@@ -135,7 +141,11 @@ Add the JSON configuration below to your MCP settings file.
   "mcpServers": {
     "zsm": {
       "command": "bunx",
-      "args": ["zigsm@latest"]
+      "args": ["zigsm@latest"],
+      "env": {
+        "VOYAGE_API_KEY": "your_voyage_api_key",
+        "VOYAGE_MODEL": "voyage-3-lite"
+      }
     }
   }
 }
@@ -161,7 +171,11 @@ claude mcp add zsm -- bunx zigsm@latest --doc-source remote --version 0.14.1
   "mcpServers": {
     "zsm": {
       "command": "npx",
-      "args": ["-y", "zigsm@latest", "--doc-source", "remote", "--version", "master"]
+      "args": ["-y", "zigsm@latest", "--doc-source", "remote", "--version", "master"],
+      "env": {
+        "VOYAGE_API_KEY": "your_voyage_api_key",
+        "VOYAGE_MODEL": "voyage-3-lite"
+      }
     }
   }
 }
@@ -173,7 +187,11 @@ claude mcp add zsm -- bunx zigsm@latest --doc-source remote --version 0.14.1
   "mcpServers": {
     "zsm": {
       "command": "bunx",
-      "args": ["zigsm@latest", "--doc-source", "remote", "--version", "0.14.1"]
+      "args": ["zigsm@latest", "--doc-source", "remote", "--version", "0.14.1"],
+      "env": {
+        "VOYAGE_API_KEY": "your_voyage_api_key",
+        "VOYAGE_MODEL": "voyage-3-lite"
+      }
     }
   }
 }
