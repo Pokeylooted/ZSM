@@ -781,6 +781,7 @@ fn expr(w: *Walk, scope: *Scope, parent_decl: Decl.Index, node: Ast.Node.Index) 
 
         .asm_simple,
         .@"asm",
+        .asm_legacy,
         => {
             const full = ast.fullAsm(node).?;
             for (full.ast.items) |n| {

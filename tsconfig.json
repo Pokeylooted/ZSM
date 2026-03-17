@@ -9,7 +9,7 @@
     "strict": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
+    "types": ["bun"]
   },
   "include": ["mcp/**/*"],
   "exclude": ["node_modules", "dist"]
