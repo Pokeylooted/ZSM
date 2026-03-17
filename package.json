@@ -24,7 +24,7 @@
   "description": "MCP server that provides up-to-date documentation for the Zig programming language standard library and builtin functions.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pokeylooted/zsm.git"
+    "url": "git+https://github.com/Pokeylooted/ZSM.git"
   },
   "keywords": [
     "mcp",
