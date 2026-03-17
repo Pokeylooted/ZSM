@@ -1,3 +1,5 @@
+import { cosineSimilarity, embedTexts, getVoyageConfig } from "./voyage.js";
+
 const CAT_namespace = 0;
 const CAT_container = 1;
 const CAT_global_variable = 2;
@@ -814,12 +816,33 @@ function setInputString(s: any) {
     wasmArray.set(jsArray);
 }
 
-export async function searchStdLib(
+interface StdLibSearchOptions {
+    zigVersion?: string;
+    docSource?: string;
+}
+
+interface EmbeddingDoc {
+    decl: number;
+    fqn: string;
+    text: string;
+}
+
+interface EmbeddingCacheFile {
+    version: 1;
+    model: string;
+    sourceHash: string;
+    zigVersion: string;
+    docSource: string;
+    docs: EmbeddingDoc[];
+    vectors: number[][];
+}
+
+let inMemoryEmbeddingCache: EmbeddingCacheFile | null = null;
+
+async function initWasmRuntime(
     wasmPath: string | Uint8Array,
     stdSources: Uint8Array<ArrayBuffer>,
-    query: string,
-    limit: number = 20,
-): Promise<string> {
+): Promise<void> {
     const fs = await import("node:fs");
     const wasmBytes = typeof wasmPath === "string" ? fs.readFileSync(wasmPath) : wasmPath;
 
@@ -841,15 +864,266 @@ export async function searchStdLib(
     const wasmArray = new Uint8Array(exports.memory.buffer, ptr, stdSources.length);
     wasmArray.set(stdSources);
     exports.unpack(ptr, stdSources.length);
+}
+
+function collectDeclsForEmbeddings(): number[] {
+    const seen = new Set<number>();
+    const result: number[] = [];
+
+    function walk(decl: number) {
+        if (decl < 0 || seen.has(decl)) {
+            return;
+        }
+        seen.add(decl);
+        result.push(decl);
+
+        const category = wasm_exports.categorize_decl(decl, 0);
+        if (category === CAT_alias) {
+            const aliasee = wasm_exports.get_aliasee();
+            if (aliasee !== -1) {
+                walk(aliasee);
+            }
+            return;
+        }
+
+        if (category === CAT_namespace || category === CAT_container) {
+            const members = namespaceMembers(decl, false).slice();
+            for (let i = 0; i < members.length; i++) {
+                walk(members[i]);
+            }
+            return;
+        }
+
+        if (category === CAT_type_function) {
+            const members = unwrapSlice32(wasm_exports.type_fn_members(decl, false)).slice();
+            for (let i = 0; i < members.length; i++) {
+                walk(members[i]);
+            }
+        }
+    }
+
+    for (let i = 0; ; i++) {
+        const name = unwrapString(wasm_exports.module_name(i));
+        if (name.length === 0) {
+            break;
+        }
+        const root = wasm_exports.find_module_root(i);
+        if (root !== -1) {
+            walk(root);
+        }
+    }
+
+    return result;
+}
+
+function stripMarkdown(input: string): string {
+    return input
+        .replace(/```[\s\S]*?```/g, " ")
+        .replace(/`([^`]+)`/g, "$1")
+        .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
+        .replace(/[#*_>~-]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function buildDeclEmbeddingText(decl: number): EmbeddingDoc {
+    const category = wasm_exports.categorize_decl(decl, 0);
+    const fqn = fullyQualifiedName(decl);
+    const name = declIndexName(decl);
+    const docs = unwrapString(wasm_exports.decl_docs_html(decl, true));
+    const proto =
+        category === CAT_function || category === CAT_type_function
+            ? unwrapString(wasm_exports.decl_fn_proto_html(decl, true))
+            : "";
+    const typeInfo =
+        category === CAT_global_variable ||
+        category === CAT_global_const ||
+        category === CAT_primitive ||
+        category === CAT_type ||
+        category === CAT_type_type
+            ? unwrapString(wasm_exports.decl_type_html(decl))
+            : "";
+    const source = unwrapString(wasm_exports.decl_source_html(decl)).slice(0, 1200);
+
+    const text = stripMarkdown(`${fqn}\n${name}\n${proto}\n${typeInfo}\n${docs}\n${source}`).slice(
+        0,
+        4000,
+    );
+
+    return { decl, fqn, text };
+}
+
+async function getEmbeddingCachePath(
+    zigVersion: string,
+    docSource: string,
+    model: string,
+): Promise<string> {
+    const envPathsMod = await import("env-paths");
+    const path = await import("node:path");
+    const paths = envPathsMod.default("zig-mcp", { suffix: "" });
+    const safeModel = model.replace(/[^a-zA-Z0-9._-]+/g, "-");
+    return path.join(paths.cache, zigVersion, `std-embeddings-${docSource}-${safeModel}.json`);
+}
+
+async function hashStdSources(stdSources: Uint8Array<ArrayBuffer>): Promise<string> {
+    const crypto = await import("node:crypto");
+    return crypto.createHash("sha256").update(stdSources).digest("hex");
+}
+
+async function loadEmbeddingCache(cachePath: string): Promise<EmbeddingCacheFile | null> {
+    const fs = await import("node:fs");
+    if (!fs.existsSync(cachePath)) {
+        return null;
+    }
+    try {
+        const raw = fs.readFileSync(cachePath, "utf8");
+        return JSON.parse(raw) as EmbeddingCacheFile;
+    } catch {
+        return null;
+    }
+}
+
+async function saveEmbeddingCache(cachePath: string, data: EmbeddingCacheFile): Promise<void> {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const dir = path.dirname(cachePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(cachePath, JSON.stringify(data));
+}
+
+async function getOrBuildEmbeddingCache(
+    wasmPath: string | Uint8Array,
+    stdSources: Uint8Array<ArrayBuffer>,
+    options: StdLibSearchOptions,
+): Promise<EmbeddingCacheFile | null> {
+    const voyage = getVoyageConfig();
+    if (!voyage) {
+        return null;
+    }
+
+    const zigVersion = options.zigVersion || "master";
+    const docSource = options.docSource || "local";
+
+    if (
+        inMemoryEmbeddingCache &&
+        inMemoryEmbeddingCache.model === voyage.model &&
+        inMemoryEmbeddingCache.zigVersion === zigVersion &&
+        inMemoryEmbeddingCache.docSource === docSource
+    ) {
+        return inMemoryEmbeddingCache;
+    }
+
+    const sourceHash = await hashStdSources(stdSources);
+    const cachePath = await getEmbeddingCachePath(zigVersion, docSource, voyage.model);
+    const existing = await loadEmbeddingCache(cachePath);
+
+    if (
+        existing &&
+        existing.version === 1 &&
+        existing.model === voyage.model &&
+        existing.sourceHash === sourceHash &&
+        existing.zigVersion === zigVersion &&
+        existing.docSource === docSource &&
+        existing.docs.length === existing.vectors.length
+    ) {
+        inMemoryEmbeddingCache = existing;
+        return existing;
+    }
+
+    await initWasmRuntime(wasmPath, stdSources);
+    const decls = collectDeclsForEmbeddings();
+    const docs = decls.map((decl) => buildDeclEmbeddingText(decl)).filter((doc) => doc.text.length > 0);
+
+    if (docs.length === 0) {
+        return null;
+    }
+
+    const vectors = await embedTexts(
+        docs.map((doc) => doc.text),
+        voyage,
+        "document",
+    );
+
+    const built: EmbeddingCacheFile = {
+        version: 1,
+        model: voyage.model,
+        sourceHash,
+        zigVersion,
+        docSource,
+        docs,
+        vectors,
+    };
+
+    await saveEmbeddingCache(cachePath, built);
+    inMemoryEmbeddingCache = built;
+    return built;
+}
+
+function buildHybridRanking(
+    lexicalDecls: number[],
+    semanticDecls: number[],
+    maxResults: number,
+): number[] {
+    const scores = new Map<number, number>();
+
+    for (let i = 0; i < lexicalDecls.length; i++) {
+        const decl = lexicalDecls[i];
+        const score = 1 / (20 + i);
+        scores.set(decl, (scores.get(decl) || 0) + score);
+    }
+
+    for (let i = 0; i < semanticDecls.length; i++) {
+        const decl = semanticDecls[i];
+        const score = 2 / (20 + i);
+        scores.set(decl, (scores.get(decl) || 0) + score);
+    }
+
+    return Array.from(scores.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, maxResults)
+        .map(([decl]) => decl);
+}
+
+export async function searchStdLib(
+    wasmPath: string | Uint8Array,
+    stdSources: Uint8Array<ArrayBuffer>,
+    query: string,
+    limit: number = 20,
+    options: StdLibSearchOptions = {},
+): Promise<string> {
+    await initWasmRuntime(wasmPath, stdSources);
 
     const ignoreCase = query.toLowerCase() === query;
-    const results = executeQuery(query, ignoreCase);
+    const lexicalResults = Array.from(executeQuery(query, ignoreCase));
+    let mergedResults = lexicalResults;
+
+    try {
+        const voyage = getVoyageConfig();
+        if (voyage) {
+            const cache = await getOrBuildEmbeddingCache(wasmPath, stdSources, options);
+            if (cache && cache.docs.length > 0) {
+                const queryVector = (await embedTexts([query], voyage, "query"))[0];
+                const semanticResults = cache.docs
+                    .map((doc, i) => ({ decl: doc.decl, score: cosineSimilarity(queryVector, cache.vectors[i]) }))
+                    .sort((a, b) => b.score - a.score)
+                    .slice(0, Math.max(limit * 8, 120))
+                    .map((item) => item.decl);
+
+                const lexicalTop = lexicalResults.slice(0, Math.max(limit * 8, 120));
+                mergedResults = buildHybridRanking(lexicalTop, semanticResults, Math.max(limit * 8, 120));
+            }
+        }
+    } catch {
+        mergedResults = lexicalResults;
+    }
 
     let markdown = `# Search Results\n\nQuery: "${query}"\n\n`;
 
-    if (results.length > 0) {
-        const limitedResults = results.slice(0, limit);
-        markdown += `Found ${results.length} results (showing ${limitedResults.length}):\n\n`;
+    if (mergedResults.length > 0) {
+        const limitedResults = mergedResults.slice(0, limit);
+        markdown += `Found ${mergedResults.length} results (showing ${limitedResults.length}):\n\n`;
         for (let i = 0; i < limitedResults.length; i++) {
             const match = limitedResults[i];
             const full_name = fullyQualifiedName(match);
@@ -868,27 +1142,9 @@ export async function getStdLibItem(
     name: string,
     getSourceFile: boolean = false,
 ): Promise<string> {
-    const fs = await import("node:fs");
-    const wasmBytes = typeof wasmPath === "string" ? fs.readFileSync(wasmPath) : wasmPath;
+    await initWasmRuntime(wasmPath, stdSources);
 
-    const wasmModule = await WebAssembly.instantiate(wasmBytes, {
-        js: {
-            log: (level: any, ptr: any, len: any) => {
-                const msg = decodeString(ptr, len);
-                if (level === LOG_err) {
-                    throw new Error(msg);
-                }
-            },
-        },
-    });
-
-    const exports = (wasmModule as any).instance.exports as any;
-    wasm_exports = exports;
-
-    const ptr = exports.alloc(stdSources.length);
-    const wasmArray = new Uint8Array(exports.memory.buffer, ptr, stdSources.length);
-    wasmArray.set(stdSources);
-    exports.unpack(ptr, stdSources.length);
+    const exports = wasm_exports;
 
     const decl_index = findDecl(name);
     if (decl_index === null) {

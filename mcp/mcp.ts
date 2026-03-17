@@ -129,7 +129,10 @@ async function main() {
         version: options.version,
     });
 
-    await registerAllTools(mcpServer, builtinFunctions, stdSources);
+    await registerAllTools(mcpServer, builtinFunctions, stdSources, {
+        zigVersion: options.version,
+        docSource: options.docSource,
+    });
 
     const transport = new StdioServerTransport();
     await mcpServer.connect(transport);
