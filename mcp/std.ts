@@ -839,6 +839,27 @@ interface EmbeddingCacheFile {
 
 let inMemoryEmbeddingCache: EmbeddingCacheFile | null = null;
 
+interface SourceDeclEntry {
+    name: string;
+    path: string;
+    line: number;
+    preview: string;
+}
+
+interface SourceFileEntry {
+    path: string;
+    text: string;
+    lowerText: string;
+}
+
+interface SourceTextIndex {
+    files: SourceFileEntry[];
+    decls: SourceDeclEntry[];
+}
+
+let cachedSourceTextIndex: SourceTextIndex | null = null;
+let cachedSourceTextRef: Uint8Array<ArrayBuffer> | null = null;
+
 async function initWasmRuntime(
     wasmPath: string | Uint8Array,
     stdSources: Uint8Array<ArrayBuffer>,
@@ -926,6 +947,182 @@ function stripMarkdown(input: string): string {
         .trim();
 }
 
+function parseTarOctal(raw: string): number {
+    const cleaned = raw.replace(/\0/g, "").trim();
+    if (!cleaned) return 0;
+    const parsed = Number.parseInt(cleaned, 8);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseSourcesTar(stdSources: Uint8Array<ArrayBuffer>): SourceFileEntry[] {
+    const files: SourceFileEntry[] = [];
+    let offset = 0;
+
+    while (offset + 512 <= stdSources.length) {
+        const header = stdSources.subarray(offset, offset + 512);
+        let emptyHeader = true;
+        for (let i = 0; i < 512; i++) {
+            if (header[i] !== 0) {
+                emptyHeader = false;
+                break;
+            }
+        }
+        if (emptyHeader) break;
+
+        const name = text_decoder.decode(header.subarray(0, 100)).replace(/\0.*$/, "").trim();
+        const sizeRaw = text_decoder
+            .decode(header.subarray(124, 136))
+            .replace(/\0.*$/, "")
+            .trim();
+        const prefix = text_decoder
+            .decode(header.subarray(345, 500))
+            .replace(/\0.*$/, "")
+            .trim();
+        const size = parseTarOctal(sizeRaw);
+        const fullPath = prefix.length > 0 ? `${prefix}/${name}` : name;
+
+        const contentStart = offset + 512;
+        const contentEnd = contentStart + size;
+        if (size > 0 && contentEnd <= stdSources.length && fullPath.endsWith(".zig")) {
+            const text = text_decoder.decode(stdSources.subarray(contentStart, contentEnd));
+            files.push({ path: fullPath, text, lowerText: text.toLowerCase() });
+        }
+
+        const paddedSize = Math.ceil(size / 512) * 512;
+        offset = contentStart + paddedSize;
+    }
+
+    return files;
+}
+
+function buildSourceTextIndex(stdSources: Uint8Array<ArrayBuffer>): SourceTextIndex {
+    if (cachedSourceTextIndex && cachedSourceTextRef === stdSources) {
+        return cachedSourceTextIndex;
+    }
+
+    const files = parseSourcesTar(stdSources);
+    const decls: SourceDeclEntry[] = [];
+    const declRegex = /^\s*(?:pub\s+)?(?:const|var|fn)\s+([A-Za-z_][A-Za-z0-9_]*)/;
+
+    for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+        const file = files[fileIndex];
+        const lines = file.text.split("\n");
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            const line = lines[lineIndex];
+            const match = line.match(declRegex);
+            if (!match) continue;
+            decls.push({
+                name: match[1],
+                path: file.path,
+                line: lineIndex + 1,
+                preview: line.trim(),
+            });
+        }
+    }
+
+    cachedSourceTextRef = stdSources;
+    cachedSourceTextIndex = { files, decls };
+    return cachedSourceTextIndex;
+}
+
+function fallbackSearchStdLib(stdSources: Uint8Array<ArrayBuffer>, query: string, limit: number): string {
+    const index = buildSourceTextIndex(stdSources);
+    const queryLower = query.toLowerCase().trim();
+
+    const scored = index.decls
+        .map((decl) => {
+            const nameLower = decl.name.toLowerCase();
+            const pathLower = decl.path.toLowerCase();
+            let score = 0;
+
+            if (nameLower === queryLower) score += 1000;
+            else if (nameLower.startsWith(queryLower)) score += 700;
+            else if (nameLower.includes(queryLower)) score += 450;
+
+            if (pathLower.includes(queryLower)) score += 150;
+
+            return { decl, score };
+        })
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+    let markdown = `# Search Results\n\nQuery: "${query}"\n\n`;
+    markdown += `_Fallback mode: text index (parser-incompatible Zig version)_\n\n`;
+
+    if (scored.length === 0) {
+        markdown += "No results found.";
+        return markdown;
+    }
+
+    const limited = scored.slice(0, limit);
+    markdown += `Found ${scored.length} results (showing ${limited.length}):\n\n`;
+    for (let i = 0; i < limited.length; i++) {
+        const entry = limited[i].decl;
+        markdown += `- std.${entry.name} (${entry.path}:${entry.line})\n`;
+    }
+
+    return markdown;
+}
+
+function fallbackGetStdLibItem(
+    stdSources: Uint8Array<ArrayBuffer>,
+    name: string,
+    getSourceFile: boolean,
+): string {
+    const index = buildSourceTextIndex(stdSources);
+
+    if (getSourceFile) {
+        const normalized = name.replace(/^src\//, "");
+        const matchedFile =
+            index.files.find((file) => file.path === normalized) ||
+            index.files.find((file) => file.path.endsWith(`/${normalized}`)) ||
+            index.files.find((file) => file.path.endsWith(name));
+
+        if (!matchedFile) {
+            return `# Error\n\nCould not find source file for "${name}" in fallback mode.`;
+        }
+
+        return `# ${matchedFile.path}\n\n${matchedFile.text}`;
+    }
+
+    const target = name.split(".").pop()?.trim() || name.trim();
+    const targetLower = target.toLowerCase();
+    const ranked = index.decls
+        .map((decl) => {
+            const declLower = decl.name.toLowerCase();
+            let score = 0;
+            if (declLower === targetLower) score += 1000;
+            else if (declLower.startsWith(targetLower)) score += 700;
+            else if (declLower.includes(targetLower)) score += 450;
+            return { decl, score };
+        })
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+    if (ranked.length === 0) {
+        return `# Error\n\nDeclaration "${name}" not found (fallback mode).`;
+    }
+
+    const best = ranked[0].decl;
+    const file = index.files.find((entry) => entry.path === best.path);
+    if (!file) {
+        return `# Error\n\nDeclaration "${name}" matched, but source file could not be loaded.`;
+    }
+
+    const lines = file.text.split("\n");
+    const startLine = Math.max(1, best.line - 20);
+    const endLine = Math.min(lines.length, best.line + 80);
+    const snippet = lines.slice(startLine - 1, endLine).join("\n");
+
+    let markdown = `# ${name}\n\n`;
+    markdown += `_Fallback mode: text index (parser-incompatible Zig version)_\n\n`;
+    markdown += `Match: ${best.path}:${best.line}\n\n`;
+    markdown += "```zig\n";
+    markdown += snippet;
+    markdown += "\n```\n";
+    return markdown;
+}
+
 function buildDeclEmbeddingText(decl: number): EmbeddingDoc {
     const category = wasm_exports.categorize_decl(decl, 0);
     const fqn = fullyQualifiedName(decl);
@@ -951,6 +1148,14 @@ function buildDeclEmbeddingText(decl: number): EmbeddingDoc {
     );
 
     return { decl, fqn, text };
+}
+
+function tryBuildDeclEmbeddingText(decl: number): EmbeddingDoc | null {
+    try {
+        return buildDeclEmbeddingText(decl);
+    } catch {
+        return null;
+    }
 }
 
 async function getEmbeddingCachePath(
@@ -1032,9 +1237,14 @@ async function getOrBuildEmbeddingCache(
         return existing;
     }
 
-    await initWasmRuntime(wasmPath, stdSources);
     const decls = collectDeclsForEmbeddings();
-    const docs = decls.map((decl) => buildDeclEmbeddingText(decl)).filter((doc) => doc.text.length > 0);
+    const docs: EmbeddingDoc[] = [];
+    for (let i = 0; i < decls.length; i++) {
+        const doc = tryBuildDeclEmbeddingText(decls[i]);
+        if (doc && doc.text.length > 0) {
+            docs.push(doc);
+        }
+    }
 
     if (docs.length === 0) {
         return null;
@@ -1093,7 +1303,11 @@ export async function searchStdLib(
     limit: number = 20,
     options: StdLibSearchOptions = {},
 ): Promise<string> {
-    await initWasmRuntime(wasmPath, stdSources);
+    try {
+        await initWasmRuntime(wasmPath, stdSources);
+    } catch {
+        return fallbackSearchStdLib(stdSources, query, limit);
+    }
 
     const ignoreCase = query.toLowerCase() === query;
     const lexicalResults = Array.from(executeQuery(query, ignoreCase));
@@ -1142,7 +1356,11 @@ export async function getStdLibItem(
     name: string,
     getSourceFile: boolean = false,
 ): Promise<string> {
-    await initWasmRuntime(wasmPath, stdSources);
+    try {
+        await initWasmRuntime(wasmPath, stdSources);
+    } catch {
+        return fallbackGetStdLibItem(stdSources, name, getSourceFile);
+    }
 
     const exports = wasm_exports;
 
