@@ -82,7 +82,7 @@ When using `--doc-source remote`, documentation is fetched from ziglang.org and 
 
 Optional environment variables:
 - `VOYAGE_API_KEY` - Enables embeddings for doc search when set.
-- `VOYAGE_MODEL` - Embedding model override (default: `voyage-3-lite`).
+- `VOYAGE_MODEL` - Embedding model override (default: `voyage-code-3`).
 
 Embeddings are cached per Zig version, doc source, and model in the same cache directory used for docs.
 
@@ -128,7 +128,7 @@ To enable semantic search with Voyage embeddings, include an `env` block like sh
       "args": ["-y", "zigsm@latest"],
       "env": {
         "VOYAGE_API_KEY": "your_voyage_api_key",
-        "VOYAGE_MODEL": "voyage-3-lite"
+        "VOYAGE_MODEL": "voyage-code-3"
       }
     }
   }
@@ -144,7 +144,7 @@ To enable semantic search with Voyage embeddings, include an `env` block like sh
       "args": ["zigsm@latest"],
       "env": {
         "VOYAGE_API_KEY": "your_voyage_api_key",
-        "VOYAGE_MODEL": "voyage-3-lite"
+        "VOYAGE_MODEL": "voyage-code-3"
       }
     }
   }
@@ -174,7 +174,7 @@ claude mcp add zsm -- bunx zigsm@latest --doc-source remote --version 0.14.1
       "args": ["-y", "zigsm@latest", "--doc-source", "remote", "--version", "master"],
       "env": {
         "VOYAGE_API_KEY": "your_voyage_api_key",
-        "VOYAGE_MODEL": "voyage-3-lite"
+        "VOYAGE_MODEL": "voyage-code-3"
       }
     }
   }
@@ -190,7 +190,7 @@ claude mcp add zsm -- bunx zigsm@latest --doc-source remote --version 0.14.1
       "args": ["zigsm@latest", "--doc-source", "remote", "--version", "0.14.1"],
       "env": {
         "VOYAGE_API_KEY": "your_voyage_api_key",
-        "VOYAGE_MODEL": "voyage-3-lite"
+        "VOYAGE_MODEL": "voyage-code-3"
       }
     }
   }

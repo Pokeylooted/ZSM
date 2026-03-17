@@ -20,7 +20,7 @@ export function getVoyageConfig(): VoyageConfig | null {
 
     return {
         apiKey,
-        model: env?.VOYAGE_MODEL?.trim() || "voyage-3-lite",
+        model: env?.VOYAGE_MODEL?.trim() || "voyage-code-3",
     };
 }
 
