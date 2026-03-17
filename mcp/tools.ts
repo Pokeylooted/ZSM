@@ -4,6 +4,48 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import z from "zod";
 import type { BuiltinFunction } from "./extract-builtin-functions.js";
 import { getStdLibItem, searchStdLib } from "./std.js";
+import { cosineSimilarity, embedTexts, getVoyageConfig } from "./voyage.js";
+
+interface ToolRuntimeOptions {
+    zigVersion: string;
+    docSource: "local" | "remote";
+}
+
+interface BuiltinEmbeddingState {
+    functions: BuiltinFunction[];
+    vectors: number[][];
+}
+
+let builtinEmbeddingState: BuiltinEmbeddingState | null = null;
+
+function builtinEmbeddingText(fn: BuiltinFunction): string {
+    return `${fn.func}\n${fn.signature}\n${fn.docs}`;
+}
+
+async function getBuiltinEmbeddings(functions: BuiltinFunction[]): Promise<BuiltinEmbeddingState | null> {
+    const voyage = getVoyageConfig();
+    if (!voyage) {
+        return null;
+    }
+
+    if (builtinEmbeddingState && builtinEmbeddingState.functions === functions) {
+        return builtinEmbeddingState;
+    }
+
+    const vectors = await embedTexts(
+        functions.map((fn) => builtinEmbeddingText(fn)),
+        voyage,
+        "document",
+    );
+
+    const state = {
+        functions,
+        vectors,
+    };
+
+    builtinEmbeddingState = state;
+    return state;
+}
 
 function createListBuiltinFunctionsTool(builtinFunctions: BuiltinFunction[]) {
     return {
@@ -57,24 +99,39 @@ function getBuiltinFunctionTool(builtinFunctions: BuiltinFunction[]) {
                 };
             }
 
-            const scoredFunctions = builtinFunctions
-                .map((fn) => {
-                    const funcLower = fn.func.toLowerCase();
-                    let score = 0;
+            const scoredFunctions = builtinFunctions.map((fn) => {
+                const funcLower = fn.func.toLowerCase();
+                let score = 0;
 
-                    if (funcLower === queryLower) score += 1000;
-                    else if (funcLower.startsWith(queryLower)) score += 500;
-                    else if (funcLower.includes(queryLower)) score += 300;
+                if (funcLower === queryLower) score += 1000;
+                else if (funcLower.startsWith(queryLower)) score += 500;
+                else if (funcLower.includes(queryLower)) score += 300;
 
-                    if (score > 0) score += Math.max(0, 50 - fn.func.length);
+                if (score > 0) score += Math.max(0, 50 - fn.func.length);
 
-                    return { ...fn, score };
-                })
-                .filter((fn) => fn.score > 0);
+                return { ...fn, score };
+            });
 
-            scoredFunctions.sort((a, b) => b.score - a.score);
+            try {
+                const voyage = getVoyageConfig();
+                if (voyage) {
+                    const embeddingState = await getBuiltinEmbeddings(builtinFunctions);
+                    if (embeddingState && embeddingState.vectors.length > 0) {
+                        const queryVector = (await embedTexts([function_name], voyage, "query"))[0];
+                        for (let i = 0; i < scoredFunctions.length; i++) {
+                            const semantic = cosineSimilarity(queryVector, embeddingState.vectors[i]);
+                            scoredFunctions[i].score += semantic * 220;
+                        }
+                    }
+                }
+            } catch {
+            }
 
-            if (scoredFunctions.length === 0) {
+            const rankedFunctions = scoredFunctions.filter((fn) => fn.score > 0);
+
+            rankedFunctions.sort((a, b) => b.score - a.score);
+
+            if (rankedFunctions.length === 0) {
                 return {
                     content: [
                         {
@@ -85,14 +142,14 @@ function getBuiltinFunctionTool(builtinFunctions: BuiltinFunction[]) {
                 };
             }
 
-            const results = scoredFunctions
+            const results = rankedFunctions
                 .map((fn) => `**${fn.func}**\n\`\`\`zig\n${fn.signature}\n\`\`\`\n\n${fn.docs}`)
                 .join("\n\n---\n\n");
 
             const message =
-                scoredFunctions.length === 1
+                rankedFunctions.length === 1
                     ? results
-                    : `Found ${scoredFunctions.length} matching functions:\n\n${results}`;
+                    : `Found ${rankedFunctions.length} matching functions:\n\n${results}`;
 
             return {
                 content: [
@@ -106,7 +163,11 @@ function getBuiltinFunctionTool(builtinFunctions: BuiltinFunction[]) {
     };
 }
 
-function searchStdLibTool(wasmPath: string | Uint8Array, stdSources: Uint8Array<ArrayBuffer>) {
+function searchStdLibTool(
+    wasmPath: string | Uint8Array,
+    stdSources: Uint8Array<ArrayBuffer>,
+    options: ToolRuntimeOptions,
+) {
     return {
         name: "search_std_lib",
         config: {
@@ -129,7 +190,10 @@ function searchStdLibTool(wasmPath: string | Uint8Array, stdSources: Uint8Array<
         },
         handler: async ({ query, limit = 20 }: { query: string; limit: number }) => {
             try {
-                const markdown = await searchStdLib(wasmPath, stdSources, query, limit);
+                const markdown = await searchStdLib(wasmPath, stdSources, query, limit, {
+                    zigVersion: options.zigVersion,
+                    docSource: options.docSource,
+                });
                 return {
                     content: [
                         {
@@ -208,6 +272,7 @@ export async function registerAllTools(
     mcpServer: McpServer,
     builtinFunctions: BuiltinFunction[],
     stdSources: Uint8Array<ArrayBuffer>,
+    options: ToolRuntimeOptions,
 ) {
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
     const wasmPath = path.join(currentDir, "main.wasm");
@@ -226,7 +291,7 @@ export async function registerAllTools(
         getBuiltinFunction.handler,
     );
 
-    const stdLibSearch = searchStdLibTool(wasmPath, stdSources);
+    const stdLibSearch = searchStdLibTool(wasmPath, stdSources, options);
     mcpServer.registerTool(stdLibSearch.name, stdLibSearch.config, stdLibSearch.handler);
 
     const stdLibItem = getStdLibItemTool(wasmPath, stdSources);
