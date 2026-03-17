@@ -99,13 +99,24 @@ function getBuiltinFunctionTool(builtinFunctions: BuiltinFunction[]) {
                 };
             }
 
+            const queryBare = queryLower.replace(/@/g, "");
+            const queryWords = queryBare.split(/\s+/).filter(Boolean);
+
             const scoredFunctions = builtinFunctions.map((fn) => {
                 const funcLower = fn.func.toLowerCase();
+                const funcBare = funcLower.replace(/^@/, "");
                 let score = 0;
 
-                if (funcLower === queryLower) score += 1000;
+                if (funcLower === queryLower || funcBare === queryBare) score += 1000;
                 else if (funcLower.startsWith(queryLower)) score += 500;
                 else if (funcLower.includes(queryLower)) score += 300;
+
+                if (score === 0 && queryWords.length > 0) {
+                    const searchable = `${funcBare} ${fn.docs.toLowerCase()} ${fn.signature.toLowerCase()}`;
+                    const wordHits = queryWords.filter((w) => searchable.includes(w)).length;
+                    if (wordHits === queryWords.length) score += 200;
+                    else if (wordHits > 0) score += wordHits * 60;
+                }
 
                 if (score > 0) score += Math.max(0, 50 - fn.func.length);
 

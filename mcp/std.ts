@@ -857,8 +857,44 @@ interface SourceTextIndex {
     decls: SourceDeclEntry[];
 }
 
+interface ContentMatch {
+    path: string;
+    line: number;
+    preview: string;
+    score: number;
+}
+
 let cachedSourceTextIndex: SourceTextIndex | null = null;
 let cachedSourceTextRef: Uint8Array<ArrayBuffer> | null = null;
+
+function countWordHits(text: string, words: string[]): number {
+    let hits = 0;
+    for (const word of words) {
+        if (text.includes(word)) hits++;
+    }
+    return hits;
+}
+
+function scoreDeclMatch(decl: SourceDeclEntry, queryLower: string, queryWords: string[]): number {
+    const nameLower = decl.name.toLowerCase();
+    const pathLower = decl.path.toLowerCase();
+    let score = 0;
+
+    if (nameLower === queryLower) score += 1000;
+    else if (nameLower.startsWith(queryLower)) score += 700;
+    else if (nameLower.includes(queryLower)) score += 450;
+
+    if (pathLower.includes(queryLower)) score += 150;
+
+    if (score === 0 && queryWords.length > 0) {
+        const searchable = `${nameLower} ${decl.preview.toLowerCase()} ${pathLower}`;
+        const wordHits = countWordHits(searchable, queryWords);
+        if (wordHits === queryWords.length) score += 300;
+        else if (wordHits > 0) score += wordHits * 80;
+    }
+
+    return score;
+}
 
 async function initWasmRuntime(
     wasmPath: string | Uint8Array,
@@ -1028,37 +1064,59 @@ function buildSourceTextIndex(stdSources: Uint8Array<ArrayBuffer>): SourceTextIn
 function fallbackSearchStdLib(stdSources: Uint8Array<ArrayBuffer>, query: string, limit: number): string {
     const index = buildSourceTextIndex(stdSources);
     const queryLower = query.toLowerCase().trim();
+    const queryWords = queryLower.split(/\s+/).filter(Boolean);
 
-    const scored = index.decls
-        .map((decl) => {
-            const nameLower = decl.name.toLowerCase();
-            const pathLower = decl.path.toLowerCase();
-            let score = 0;
-
-            if (nameLower === queryLower) score += 1000;
-            else if (nameLower.startsWith(queryLower)) score += 700;
-            else if (nameLower.includes(queryLower)) score += 450;
-
-            if (pathLower.includes(queryLower)) score += 150;
-
-            return { decl, score };
-        })
+    const declScored = index.decls
+        .map((decl) => ({ decl, score: scoreDeclMatch(decl, queryLower, queryWords) }))
         .filter((item) => item.score > 0)
         .sort((a, b) => b.score - a.score);
+
+    const contentMatches: ContentMatch[] = [];
+    if (declScored.length < limit) {
+        for (const file of index.files) {
+            const lines = file.text.split("\n");
+            for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+                const wordHits = countWordHits(lines[lineIndex].toLowerCase(), queryWords);
+                if (wordHits === queryWords.length) {
+                    contentMatches.push({
+                        path: file.path,
+                        line: lineIndex + 1,
+                        preview: lines[lineIndex].trim().slice(0, 120),
+                        score: 200 + wordHits * 30,
+                    });
+                }
+                if (contentMatches.length >= limit * 3) break;
+            }
+            if (contentMatches.length >= limit * 3) break;
+        }
+        contentMatches.sort((a, b) => b.score - a.score);
+    }
 
     let markdown = `# Search Results\n\nQuery: "${query}"\n\n`;
     markdown += `_Fallback mode: text index (parser-incompatible Zig version)_\n\n`;
 
-    if (scored.length === 0) {
+    if (declScored.length === 0 && contentMatches.length === 0) {
         markdown += "No results found.";
         return markdown;
     }
 
-    const limited = scored.slice(0, limit);
-    markdown += `Found ${scored.length} results (showing ${limited.length}):\n\n`;
-    for (let i = 0; i < limited.length; i++) {
-        const entry = limited[i].decl;
-        markdown += `- std.${entry.name} (${entry.path}:${entry.line})\n`;
+    if (declScored.length > 0) {
+        const limited = declScored.slice(0, limit);
+        markdown += `Found ${declScored.length} declaration matches (showing ${limited.length}):\n\n`;
+        for (let i = 0; i < limited.length; i++) {
+            const entry = limited[i].decl;
+            markdown += `- std.${entry.name} (${entry.path}:${entry.line})\n`;
+        }
+    }
+
+    if (contentMatches.length > 0 && declScored.length < limit) {
+        const remaining = limit - declScored.length;
+        const limited = contentMatches.slice(0, remaining);
+        markdown += `\nContent matches:\n\n`;
+        for (let i = 0; i < limited.length; i++) {
+            const entry = limited[i];
+            markdown += `- ${entry.path}:${entry.line} — \`${entry.preview}\`\n`;
+        }
     }
 
     return markdown;
@@ -1088,14 +1146,7 @@ function fallbackGetStdLibItem(
     const target = name.split(".").pop()?.trim() || name.trim();
     const targetLower = target.toLowerCase();
     const ranked = index.decls
-        .map((decl) => {
-            const declLower = decl.name.toLowerCase();
-            let score = 0;
-            if (declLower === targetLower) score += 1000;
-            else if (declLower.startsWith(targetLower)) score += 700;
-            else if (declLower.includes(targetLower)) score += 450;
-            return { decl, score };
-        })
+        .map((decl) => ({ decl, score: scoreDeclMatch(decl, targetLower, [targetLower]) }))
         .filter((item) => item.score > 0)
         .sort((a, b) => b.score - a.score);
 
