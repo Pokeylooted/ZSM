@@ -123,7 +123,7 @@ async function main() {
     const stdSources = await downloadSourcesTar(options.version, true, false, options.docSource);
 
     const mcpServer = new McpServer({
-        name: "ZigDocs",
+        name: "ZSM",
         description:
             "Retrieves up-to-date documentation for the Zig programming language standard library and builtin functions.",
         version: options.version,

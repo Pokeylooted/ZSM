@@ -12,7 +12,7 @@ It uses the same approach as Zig's official autodoc (ziglang.org) by reading STD
 By default, the server uses your locally installed Zig compiler to serve documentation, ensuring you always get docs that match your actual Zig version. It can also fetch documentation from ziglang.org if needed.
 
 > [!TIP]
-> Add `use zigdocs` to your prompt if you want to explicitly instruct the LLM to use Zig docs tools. Otherwise, LLM will automatically decide when to utilize MCP tools based on the context of your questions.
+> Add `use zsm` to your prompt if you want to explicitly instruct the LLM to use zsm tools. Otherwise, LLM will automatically decide when to utilize MCP tools based on the context of your questions.
 
 <p align="center" width="100%">
   <img src="https://raw.githubusercontent.com/zig-wasm/.github/refs/heads/main/static/readme_mcp_1.gif" width="49%" />
