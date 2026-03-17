@@ -3,6 +3,7 @@ name: Publish to npm
 on:
   release:
     types: [created]
+  workflow_dispatch:
 
 jobs:
   publish-npm:
@@ -11,15 +12,15 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0-dev.205+4c0127566
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org/
 
       - uses: oven-sh/setup-bun@v2
