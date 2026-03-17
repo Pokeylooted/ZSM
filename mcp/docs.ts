@@ -44,6 +44,11 @@ export async function ensureDocs(
 
             await downloadSourcesTar(zigVersion, isMcpMode, true, docSource);
 
+            // Pre-download version-matched WASM for remote docs
+            if (docSource === "remote") {
+                await downloadVersionWasm(zigVersion, isMcpMode, true);
+            }
+
             const dir = path.dirname(metadataPath);
             if (!fs.existsSync(dir)) {
                 fs.mkdirSync(dir, { recursive: true });
@@ -129,6 +134,47 @@ export async function downloadSourcesTar(
     if (!isMcpMode) console.log(`Downloaded sources.tar to ${sourcesPath}`);
 
     return uint8Array;
+}
+
+export async function downloadVersionWasm(
+    zigVersion: string,
+    isMcpMode: boolean = false,
+    forceUpdate: boolean = false,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+    const paths = envPaths("zigsm", { suffix: "" });
+    const versionCacheDir = path.join(paths.cache, zigVersion);
+    const wasmCachePath = path.join(versionCacheDir, "main.wasm");
+
+    if (fs.existsSync(wasmCachePath) && !forceUpdate) {
+        if (!isMcpMode) console.log(`Using cached main.wasm from ${wasmCachePath}`);
+        return new Uint8Array(fs.readFileSync(wasmCachePath));
+    }
+
+    const url = `https://ziglang.org/documentation/${zigVersion}/std/main.wasm`;
+    if (!isMcpMode) console.log(`Downloading main.wasm from: ${url}`);
+
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            if (!isMcpMode) console.log(`Failed to download main.wasm: HTTP ${response.status}`);
+            return null;
+        }
+
+        const buffer = await response.arrayBuffer();
+        const uint8Array = new Uint8Array(buffer);
+
+        if (!fs.existsSync(versionCacheDir)) {
+            fs.mkdirSync(versionCacheDir, { recursive: true });
+        }
+
+        fs.writeFileSync(wasmCachePath, uint8Array);
+        if (!isMcpMode) console.log(`Downloaded main.wasm to ${wasmCachePath}`);
+
+        return uint8Array;
+    } catch (error) {
+        if (!isMcpMode) console.log(`Failed to download main.wasm: ${error}`);
+        return null;
+    }
 }
 
 async function downloadSourcesTarPath(zigVersion: string): Promise<string> {

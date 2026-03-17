@@ -9,6 +9,7 @@ import { cosineSimilarity, embedTexts, getVoyageConfig } from "./voyage.js";
 interface ToolRuntimeOptions {
     zigVersion: string;
     docSource: "local" | "remote";
+    versionWasm?: Uint8Array<ArrayBuffer> | null;
 }
 
 interface BuiltinEmbeddingState {
@@ -286,7 +287,8 @@ export async function registerAllTools(
     options: ToolRuntimeOptions,
 ) {
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
-    const wasmPath = path.join(currentDir, "main.wasm");
+    const bundledWasmPath = path.join(currentDir, "main.wasm");
+    const wasmPath: string | Uint8Array = options.versionWasm ?? bundledWasmPath;
 
     const listBuiltinFunctionsTool = createListBuiltinFunctionsTool(builtinFunctions);
     mcpServer.registerTool(

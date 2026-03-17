@@ -1,6 +1,5 @@
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
-import * as http from "node:http";
 import * as path from "node:path";
 
 interface LocalStdServer {
@@ -129,55 +128,26 @@ export function stopLocalStdServer(): void {
     }
 }
 
-export async function fetchFromLocalServer(path: string): Promise<string> {
+export async function fetchFromLocalServer(urlPath: string): Promise<string> {
     const server = await startLocalStdServer();
-    const url = `${server.baseUrl}${path}`;
+    const url = `${server.baseUrl}${urlPath}`;
 
-    return new Promise((resolve, reject) => {
-        http.get(url, (res) => {
-            let data = "";
-
-            res.on("data", (chunk) => {
-                data += chunk;
-            });
-
-            res.on("end", () => {
-                if (res.statusCode === 200) {
-                    resolve(data);
-                } else {
-                    reject(new Error(`HTTP ${res.statusCode}: ${data}`));
-                }
-            });
-        }).on("error", (error) => {
-            reject(error);
-        });
-    });
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    }
+    return await response.text();
 }
 
 export async function getLocalStdSources(): Promise<Uint8Array<ArrayBuffer>> {
     const server = await startLocalStdServer();
     const url = `${server.baseUrl}/sources.tar`;
 
-    return new Promise((resolve, reject) => {
-        http.get(url, (res) => {
-            const chunks: Buffer[] = [];
-
-            res.on("data", (chunk) => {
-                chunks.push(chunk);
-            });
-
-            res.on("end", () => {
-                if (res.statusCode === 200) {
-                    const buffer = Buffer.concat(chunks);
-                    resolve(new Uint8Array(buffer));
-                } else {
-                    reject(new Error(`Failed to fetch sources.tar: HTTP ${res.statusCode}`));
-                }
-            });
-        }).on("error", (error) => {
-            reject(error);
-        });
-    });
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch sources.tar: HTTP ${response.status}`);
+    }
+    return new Uint8Array(await response.arrayBuffer());
 }
 
 process.on("exit", stopLocalStdServer);

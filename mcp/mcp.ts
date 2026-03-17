@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
     type DocSource,
     downloadSourcesTar,
+    downloadVersionWasm,
     ensureDocs,
     startViewServer,
     type UpdatePolicy,
@@ -122,6 +123,12 @@ async function main() {
     );
     const stdSources = await downloadSourcesTar(options.version, true, false, options.docSource);
 
+    // Download version-matched WASM for remote docs (different Zig versions have incompatible AST formats)
+    let versionWasm: Uint8Array<ArrayBuffer> | null = null;
+    if (options.docSource === "remote") {
+        versionWasm = await downloadVersionWasm(options.version, true);
+    }
+
     const mcpServer = new McpServer({
         name: "ZSM",
         description:
@@ -132,6 +139,7 @@ async function main() {
     await registerAllTools(mcpServer, builtinFunctions, stdSources, {
         zigVersion: options.version,
         docSource: options.docSource,
+        versionWasm,
     });
 
     const transport = new StdioServerTransport();
